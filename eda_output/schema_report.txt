@@ -1,0 +1,41 @@
+Shape: (5618, 12)
+
+Dtypes:
+Unnamed: 0              int64
+Action         string[python]
+Phase          string[python]
+DateCreated    datetime64[ns]
+UserId         string[python]
+ActionEnd      datetime64[ns]
+Duration                int64
+sessionId               int64
+ActionShort    string[python]
+REG_TYPE       string[python]
+LA                      int64
+SELF0_PEER1    string[python]
+
+Missing values per column:
+Unnamed: 0        0
+Action            0
+Phase             0
+DateCreated    3446
+UserId            0
+ActionEnd      3448
+Duration          0
+sessionId         0
+ActionShort       0
+REG_TYPE          0
+LA                0
+SELF0_PEER1       0
+
+
+Numeric summary:
+        Unnamed: 0      Duration    sessionId           LA
+count  5618.000000  5.618000e+03  5618.000000  5618.000000
+mean   2824.184941 -1.272516e+03   334.249733     0.208437
+std    1629.198069  1.018425e+05   181.340193     0.406227
+min       0.000000 -2.363262e+06     1.000000     0.000000
+25%    1414.250000  6.000000e+00   173.000000     0.000000
+50%    2826.500000  1.900000e+01   365.000000     0.000000
+75%    4234.750000  7.300000e+01   501.000000     0.000000
+max    5646.000000  8.948720e+05   614.000000     1.000000
