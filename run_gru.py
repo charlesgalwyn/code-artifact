@@ -1,6 +1,9 @@
-# run.py
+# run_gru.py
 import os
 import json
+import datetime as dt
+from copy import deepcopy
+
 import numpy as np
 import pandas as pd
 import matplotlib
@@ -14,7 +17,7 @@ from core.data_processor import DataLoader
 from core.model import ModelWrapper
 
 def plot_confusion(cm, classes, outpath):
-    plt.figure(figsize=(8, 6))
+    plt.figure(figsize=(8,6))
     plt.imshow(cm, interpolation='nearest', cmap='Blues')
     plt.title('Confusion Matrix')
     plt.colorbar()
@@ -33,66 +36,57 @@ def plot_confusion(cm, classes, outpath):
     plt.savefig(outpath, dpi=150)
     plt.close()
 
-def main():
-    cfg_path = "config.json"
-    if not os.path.exists(cfg_path):
-        raise FileNotFoundError("config.json not found.")
-    configs = json.load(open(cfg_path, 'r'))
+def main(config_path="config.json"):
+    if not os.path.exists(config_path):
+        raise FileNotFoundError("config.json not found in project root.")
 
+    configs = json.load(open(config_path, 'r'))
     data_cfg = configs.get('data', {})
-    model_cfg = configs.get('model', {})
+    model_cfg = deepcopy(configs.get('model', {}))
     training_cfg = configs.get('training', {})
 
-    save_dir = os.path.join(model_cfg.get('save_dir', 'saved_models'), 'lstm')
-    os.makedirs(save_dir, exist_ok=True)
+    # override to GRU
+    model_cfg['rnn_type'] = 'gru'
+    model_cfg['bidirectional'] = False
+    model_cfg['num_classes'] = int(model_cfg.get('num_classes', configs.get('data', {}).get('num_classes', 2)))
 
-    data_file = os.path.join('data', data_cfg['filename'])
+    data_file = os.path.join('data', data_cfg.get('filename', 'share-student-activity-data.csv'))
     seq_len = int(data_cfg.get('sequence_length', 50))
     normalise = bool(data_cfg.get('normalise', True))
     train_frac = float(data_cfg.get('train_test_split', 0.85))
 
-    # load data
-    loader = DataLoader(data_file, train_frac, seq_cols=data_cfg.get('numeric_columns', None), label_col=data_cfg.get('label_col','Phase'))
+    ts = dt.datetime.now().strftime('%Y%m%d-%H%M%S')
+    save_dir = os.path.join('saved_models', f"gru-{ts}")
+    os.makedirs(save_dir, exist_ok=True)
+    print("[GRU] Saving outputs to:", save_dir)
 
-    # get vocab sizes, numeric info
+    loader = DataLoader(data_file, train_frac, seq_cols=data_cfg.get('numeric_columns', None), label_col=data_cfg.get('label_col','Phase'))
     vocab_sizes = loader.get_vocab_sizes()
     num_info = loader.get_numeric_info()
     n_numeric = int(num_info.get('n_numeric', 0))
-    print("[Run] Vocab sizes:", vocab_sizes)
-    print("[Run] Numeric features:", num_info.get('numeric_cols', []))
 
-    # build train/test windows -> returns ([action, reg, self, numeric], y)
     (X_action_train, X_reg_train, X_self_train, X_num_train), y_train = loader.get_train_data(seq_len=seq_len, normalise=normalise)
     (X_action_test, X_reg_test, X_self_test, X_num_test), y_test = loader.get_test_data(seq_len=seq_len, normalise=normalise)
 
-    print("[Run] Train windows:", X_action_train.shape, X_num_train.shape, "Test windows:", X_action_test.shape, X_num_test.shape)
-
     if X_action_train.shape[0] == 0:
-        raise RuntimeError("No training windows produced. Reduce sequence_length or check data.")
+        raise RuntimeError("No training windows produced. Check sequence_length or data.")
+    timesteps = X_action_train.shape[1]
 
-    timesteps = X_action_train.shape[1]  # seq_len - 1
-
-    # build model
     wrapper = ModelWrapper()
-    # pass num_classes into model cfg for final dense
-    model_cfg['num_classes'] = int(loader.num_classes)
-    configs['model'] = model_cfg
-    wrapper.build_model(configs, vocab_sizes=vocab_sizes, n_numeric=n_numeric, timesteps=timesteps)
+    temp_configs = configs.copy()
+    temp_configs['model'] = model_cfg
+    wrapper.build_model(temp_configs, vocab_sizes=vocab_sizes, n_numeric=n_numeric, timesteps=timesteps)
 
-    # compute class weights
     unique_classes = np.unique(y_train)
     cw = compute_class_weight(class_weight='balanced', classes=unique_classes, y=y_train)
     class_weight_dict = { int(c): float(w) for c, w in zip(unique_classes, cw) }
-    print("[Run] Class weights:", class_weight_dict)
+    print("[GRU] Class weights:", class_weight_dict)
 
-    # prepare input lists for fit/predict
     X_train_list = [X_action_train, X_reg_train, X_self_train, X_num_train]
     X_test_list = [X_action_test, X_reg_test, X_self_test, X_num_test]
 
-    # train
     history = wrapper.train(
-        x=X_train_list,
-        y=y_train,
+        x=X_train_list, y=y_train,
         epochs=int(training_cfg.get('epochs', 8)),
         batch_size=int(training_cfg.get('batch_size', 32)),
         save_dir=save_dir,
@@ -100,29 +94,18 @@ def main():
         class_weight=class_weight_dict
     )
 
-    # save history
-    hist_out = os.path.join(save_dir, "training_history.csv")
-    pd.DataFrame(history.history).to_csv(hist_out, index=False)
-    print("[Run] Saved training history to:", hist_out)
+    pd.DataFrame(history.history).to_csv(os.path.join(save_dir, "training_history.csv"), index=False)
 
-    # evaluate
     y_pred = wrapper.predict_classes(X_test_list)
     acc = accuracy_score(y_test, y_pred)
-    print("\nTest Accuracy: %.4f" % acc)
-    print("\nClassification Report:\n", classification_report(y_test, y_pred, target_names=loader.get_label_mapping()))
+    print("\n[GRU] Test Accuracy: %.4f" % acc)
+    print("\n[GRU] Classification Report:\n", classification_report(y_test, y_pred, target_names=loader.get_label_mapping()))
 
-    # confusion
     cm = confusion_matrix(y_test, y_pred)
     cm_path = os.path.join(save_dir, "confusion_matrix.png")
     plot_confusion(cm, loader.get_label_mapping(), cm_path)
-    print("[Run] Saved confusion matrix to:", cm_path)
-
-    # save predictions
-    out_csv = os.path.join(save_dir, "predictions_vs_true.csv")
-    pd.DataFrame({"y_true": y_test, "y_pred": y_pred}).to_csv(out_csv, index=False)
-    print("[Run] Saved predictions CSV to:", out_csv)
-
-    print("[Run] Completed. Artifacts saved in:", os.path.abspath(save_dir))
+    pd.DataFrame({"y_true": y_test, "y_pred": y_pred}).to_csv(os.path.join(save_dir, "predictions_vs_true.csv"), index=False)
+    print("[GRU] Completed. Artifacts saved to:", os.path.abspath(save_dir))
 
 if __name__ == '__main__':
     main()

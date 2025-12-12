@@ -1,4 +1,4 @@
-# run.py
+    # run_transformer.py
 import os
 import json
 import numpy as np
@@ -11,7 +11,7 @@ from sklearn.metrics import accuracy_score, classification_report, confusion_mat
 from sklearn.utils.class_weight import compute_class_weight
 
 from core.data_processor import DataLoader
-from core.model import ModelWrapper
+from core.model_transformer import TransformerModel
 
 def plot_confusion(cm, classes, outpath):
     plt.figure(figsize=(8, 6))
@@ -43,7 +43,7 @@ def main():
     model_cfg = configs.get('model', {})
     training_cfg = configs.get('training', {})
 
-    save_dir = os.path.join(model_cfg.get('save_dir', 'saved_models'), 'lstm')
+    save_dir = os.path.join(model_cfg.get('save_dir', 'saved_models'), 'transformer')
     os.makedirs(save_dir, exist_ok=True)
 
     data_file = os.path.join('data', data_cfg['filename'])
@@ -51,46 +51,39 @@ def main():
     normalise = bool(data_cfg.get('normalise', True))
     train_frac = float(data_cfg.get('train_test_split', 0.85))
 
-    # load data
     loader = DataLoader(data_file, train_frac, seq_cols=data_cfg.get('numeric_columns', None), label_col=data_cfg.get('label_col','Phase'))
 
-    # get vocab sizes, numeric info
     vocab_sizes = loader.get_vocab_sizes()
     num_info = loader.get_numeric_info()
     n_numeric = int(num_info.get('n_numeric', 0))
-    print("[Run] Vocab sizes:", vocab_sizes)
-    print("[Run] Numeric features:", num_info.get('numeric_cols', []))
+    print("[Run-Transformer] Vocab sizes:", vocab_sizes)
+    print("[Run-Transformer] Numeric features:", num_info.get('numeric_cols', []))
 
-    # build train/test windows -> returns ([action, reg, self, numeric], y)
     (X_action_train, X_reg_train, X_self_train, X_num_train), y_train = loader.get_train_data(seq_len=seq_len, normalise=normalise)
     (X_action_test, X_reg_test, X_self_test, X_num_test), y_test = loader.get_test_data(seq_len=seq_len, normalise=normalise)
 
-    print("[Run] Train windows:", X_action_train.shape, X_num_train.shape, "Test windows:", X_action_test.shape, X_num_test.shape)
-
+    print("[Run-Transformer] Train windows:", X_action_train.shape, X_num_train.shape, "Test windows:", X_action_test.shape, X_num_test.shape)
     if X_action_train.shape[0] == 0:
         raise RuntimeError("No training windows produced. Reduce sequence_length or check data.")
 
-    timesteps = X_action_train.shape[1]  # seq_len - 1
+    timesteps = X_action_train.shape[1]
 
-    # build model
-    wrapper = ModelWrapper()
-    # pass num_classes into model cfg for final dense
+    # build transformer
+    transformer = TransformerModel()
     model_cfg['num_classes'] = int(loader.num_classes)
     configs['model'] = model_cfg
-    wrapper.build_model(configs, vocab_sizes=vocab_sizes, n_numeric=n_numeric, timesteps=timesteps)
+    transformer.build_model(configs, vocab_sizes=vocab_sizes, n_numeric=n_numeric, timesteps=timesteps)
 
     # compute class weights
     unique_classes = np.unique(y_train)
     cw = compute_class_weight(class_weight='balanced', classes=unique_classes, y=y_train)
     class_weight_dict = { int(c): float(w) for c, w in zip(unique_classes, cw) }
-    print("[Run] Class weights:", class_weight_dict)
+    print("[Run-Transformer] Class weights:", class_weight_dict)
 
-    # prepare input lists for fit/predict
     X_train_list = [X_action_train, X_reg_train, X_self_train, X_num_train]
     X_test_list = [X_action_test, X_reg_test, X_self_test, X_num_test]
 
-    # train
-    history = wrapper.train(
+    history = transformer.train(
         x=X_train_list,
         y=y_train,
         epochs=int(training_cfg.get('epochs', 8)),
@@ -101,28 +94,28 @@ def main():
     )
 
     # save history
-    hist_out = os.path.join(save_dir, "training_history.csv")
+    hist_out = os.path.join(save_dir, "training_history_transformer.csv")
     pd.DataFrame(history.history).to_csv(hist_out, index=False)
-    print("[Run] Saved training history to:", hist_out)
+    print("[Run-Transformer] Saved training history to:", hist_out)
 
     # evaluate
-    y_pred = wrapper.predict_classes(X_test_list)
+    y_pred = transformer.predict_classes(X_test_list)
     acc = accuracy_score(y_test, y_pred)
-    print("\nTest Accuracy: %.4f" % acc)
+    print("\nTransformer Test Accuracy: %.4f" % acc)
     print("\nClassification Report:\n", classification_report(y_test, y_pred, target_names=loader.get_label_mapping()))
 
     # confusion
     cm = confusion_matrix(y_test, y_pred)
-    cm_path = os.path.join(save_dir, "confusion_matrix.png")
+    cm_path = os.path.join(save_dir, "confusion_matrix_transformer.png")
     plot_confusion(cm, loader.get_label_mapping(), cm_path)
-    print("[Run] Saved confusion matrix to:", cm_path)
+    print("[Run-Transformer] Saved confusion matrix to:", cm_path)
 
     # save predictions
-    out_csv = os.path.join(save_dir, "predictions_vs_true.csv")
+    out_csv = os.path.join(save_dir, "predictions_vs_true_transformer.csv")
     pd.DataFrame({"y_true": y_test, "y_pred": y_pred}).to_csv(out_csv, index=False)
-    print("[Run] Saved predictions CSV to:", out_csv)
+    print("[Run-Transformer] Saved predictions CSV to:", out_csv)
 
-    print("[Run] Completed. Artifacts saved in:", os.path.abspath(save_dir))
+    print("[Run-Transformer] Completed. Artifacts saved in:", os.path.abspath(save_dir))
 
 if __name__ == '__main__':
     main()
