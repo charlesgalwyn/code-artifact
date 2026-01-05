@@ -1,0 +1,4 @@
+# Deployment-only dependencies
+fastapi>=0.100
+uvicorn>=0.23
+pydantic>=2.0
